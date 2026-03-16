@@ -1,116 +1,160 @@
-# ⚡ TapNation Social Hub — POC
+# TapNation Social Hub
 
-> Play. Earn. Own. — A Web3 + AI gaming hub built with React Native, Sequence WaaS & Groq AI.
+TapNation Social Hub is an Expo + React Native app that combines Web3 wallet auth (Sequence WaaS), social login, and an AI-powered offer feed into a game-style reward experience.
 
----
+## What This App Does
 
-## 🗂 Project Structure
+- Authenticates users with Google, Apple (iOS), Email OTP, or Guest login
+- Creates and restores a Sequence WaaS wallet session
+- Fetches AVAX balance on Avalanche Fuji testnet
+- Streams game task offers (AI-generated with fallback mock offers)
+- Simulates reward claiming with animated UI feedback
 
+## Tech Stack
+
+- Expo SDK 54 + React Native 0.81 + TypeScript
+- Sequence WaaS (`@0xsequence/waas`)
+- Zustand for global state
+- React Navigation (native stack)
+- Reanimated + Expo UI modules
+- OpenRouter API for AI offer generation
+
+## Project Structure
+
+```text
+.
+|- App.tsx
+|- index.ts
+|- cryptoSetup.ts
+|- src/
+|  |- components/
+|  |- config/
+|  |- hooks/
+|  |- navigation/
+|  |- screens/
+|  |- services/
+|  |- stores/
+|  `- types/
+|- assets/
+|- app.json
+|- eas.json
+`- .env.example
 ```
-TapNationSocialHub/
-├── App.tsx                    # Root component
-├── index.ts                   # Entry point (crypto shims loaded here)
-├── cryptoSetup.ts             # CRITICAL: Sequence WaaS crypto shims
-├── babel.config.js            # Module resolver for crypto aliases
-├── metro.config.js            # Metro bundler shim config
-├── app.json                   # Expo config (bundle IDs, OAuth redirect)
-├── .env.example               # Environment variable template
-└── src/
-    ├── config/
-    │   ├── constants.ts       # API keys, colors, design tokens
-    │   └── waasSetup.ts       # Sequence WaaS singleton + helpers
-    ├── stores/
-    │   ├── authStore.ts       # Zustand: auth state
-    │   ├── balanceStore.ts    # Zustand: wallet balance
-    │   └── offerwallStore.ts  # Zustand: AI offers
-    ├── hooks/
-    │   └── useSequenceAuth.ts # Google / Apple / Email login flows
-    ├── navigation/
-    │   └── AppNavigator.tsx   # Stack navigator (auth vs app)
-    ├── components/
-    │   ├── GradientBackground.tsx
-    │   └── NeonButton.tsx
-    ├── screens/
-    │   ├── SplashScreen.tsx
-    │   ├── LoginScreen.tsx
-    │   ├── HomeScreen.tsx
-    │   └── OfferwallScreen.tsx  # Phase 2
-    └── types/
-        └── index.ts
+
+## Prerequisites
+
+- Node.js 18+ (recommended: latest LTS)
+- npm 9+
+- Xcode (for iOS) and/or Android Studio (for Android)
+- Expo CLI via `npx expo ...` (no global install required)
+
+## Environment Variables
+
+Copy `.env.example` to `.env` and fill values:
+
+```bash
+cp .env.example .env
 ```
 
----
+PowerShell alternative:
 
-## 🚀 Setup Guide
+```powershell
+Copy-Item .env.example .env
+```
 
-### 1. Install dependencies
+Required keys:
+
+- `EXPO_PUBLIC_SEQUENCE_PROJECT_ACCESS_KEY`
+- `EXPO_PUBLIC_SEQUENCE_WAAS_CONFIG_KEY`
+- `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`
+- `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID`
+- `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`
+- `EXPO_PUBLIC_OPENROUTER_API_KEY`
+
+Notes:
+
+- Sequence keys come from your project in Sequence.
+- Google OAuth client IDs come from Google Cloud Console.
+- OpenRouter API key is used for AI-generated offers.
+
+## iOS Google OAuth Config
+
+Before iOS login works, update placeholders in `app.json`:
+
+- `expo.ios.infoPlist.GIDClientID`
+- `expo.ios.infoPlist.CFBundleURLTypes[0].CFBundleURLSchemes[0]`
+
+Replace `YOUR_IOS_CLIENT_ID` with your real iOS OAuth client id.
+
+## Install And Run
+
 ```bash
 npm install
 ```
 
-### 2. Set up environment variables
+Start dev server:
+
 ```bash
-cp .env.example .env
-# Fill in your keys (see below)
+npm run start
 ```
 
-### 3. Keys you need:
+Run native app builds:
 
-| Key | Where to get it |
-|-----|----------------|
-| `SEQUENCE_PROJECT_ACCESS_KEY` | [sequence.build](https://sequence.build) |
-| `SEQUENCE_WAAS_CONFIG_KEY` | [sequence.build](https://sequence.build) |
-| `GOOGLE_IOS_CLIENT_ID` | [console.cloud.google.com](https://console.cloud.google.com) |
-| `GOOGLE_ANDROID_CLIENT_ID` | [console.cloud.google.com](https://console.cloud.google.com) |
-| `GOOGLE_WEB_CLIENT_ID` | [console.cloud.google.com](https://console.cloud.google.com) |
-| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) |
-
-### 4. Update `app.json`
-Replace `YOUR_IOS_CLIENT_ID` with your actual Google iOS Client ID.
-
-### 5. Run
 ```bash
-# iOS
-npx expo run:ios
-
-# Android
-npx expo run:android
+npm run android
+npm run ios
 ```
 
-> ⚠️ Use `expo run:ios` not `expo start` — native modules (Sequence, Google Sign-In) require a native build.
+Run web preview:
 
----
-
-## 🔐 Auth Flow
-
-```
-App Launch
-    ↓
-SplashScreen → checkSession()
-    ↓               ↓
-Session Valid    No Session
-    ↓               ↓
-HomeScreen      LoginScreen
-               (Google / Apple / Email OTP)
-                    ↓
-              Sequence WaaS signs in
-                    ↓
-              walletAddress + AVAX balance
-                    ↓
-              HomeScreen
+```bash
+npm run web
 ```
 
----
+## Available Scripts
 
-## 🌐 Network
+- `npm run start` - Expo start with cache clear
+- `npm run android` - Build/run Android native app
+- `npm run ios` - Build/run iOS native app
+- `npm run web` - Start web target
+
+## Auth And App Flow
+
+1. Splash screen checks for existing Sequence session
+2. If no session, user lands on login screen
+3. User signs in with Google/Apple/Email OTP/Guest
+4. App stores wallet + auth state in Zustand
+5. Home screen loads balance and streams offers
+6. Claim action triggers a simulated reward transaction flow
+
+## Network Configuration
 
 Defaults to **Avalanche Fuji Testnet** (Chain ID: 43113).
 Get free test AVAX at: https://faucet.avax.network
 
----
+Default network is Avalanche Fuji testnet (`chainId: 43113`).
 
-## 📦 Phase Progress
+To change network, edit:
 
-- [x] Phase 1 — Foundation & Web3 Auth
-- [ ] Phase 2 — AI Offerwall + Claim Flow
-- [ ] Phase 3 — Gaming UI Polish + Roadmap
+- `src/config/constants.ts` -> `ACTIVE_NETWORK`
+
+## Current Implementation Notes
+
+- Offer generation uses OpenRouter (`src/services/aiOfferService.ts`).
+- If AI parsing fails, app falls back to local mock offers.
+- Reward claim transaction currently sends zero native value and is used as a flow placeholder.
+
+## EAS Build
+
+`eas.json` includes profiles:
+
+- `development` (dev client, internal)
+- `preview` (internal)
+- `production` (auto increment)
+
+You can build with:
+
+```bash
+eas build --platform ios --profile development
+eas build --platform android --profile development
+```
