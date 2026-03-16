@@ -105,18 +105,11 @@ npm run android
 npm run ios
 ```
 
-Run web preview:
-
-```bash
-npm run web
-```
-
 ## Available Scripts
 
 - `npm run start` - Expo start with cache clear
 - `npm run android` - Build/run Android native app
 - `npm run ios` - Build/run iOS native app
-- `npm run web` - Start web target
 
 ## Auth And App Flow
 
