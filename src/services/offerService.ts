@@ -18,19 +18,27 @@ const tasks = [
   "Collect 100 coins",
 ];
 
-export const streamOffers = async (addOffer: any, resetOffer: any, setGenerating: any) => {
+type StreamOffersParams = {
+  addOffer: (offer: Offer) => void;
+  resetOffer: () => void;
+  setGenerating: (value: boolean) => void;
+};
 
+export const streamOffers = async ({ addOffer, resetOffer, setGenerating }: StreamOffersParams) => {
   const offers = await generateGameOffers();
   resetOffer();
+
   if (offers.length > 0) {
-    for (let i = 0; i < 3; i++) {
+    const toRender = offers.slice(0, 3);
+    for (const offer of toRender) {
       await new Promise((resolve) =>
         setTimeout(resolve, 900)
       );
 
       addOffer({
         id: Date.now() + Math.random(),
-        ...offers[i],
+        ...offer,
+        reward: offer.reward.toFixed(3),
       });
     }
   } else {

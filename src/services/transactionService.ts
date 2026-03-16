@@ -2,8 +2,8 @@ import { sequenceWaas } from "@/config/waasSetup";
 
 export interface ClaimTransaction {
     walletAddress: string;
-    reward: number;
-    offerId: string | number;
+    reward: string;
+    offerId: number;
 }
 
 export const sendRewardTransaction = async ({
@@ -16,7 +16,7 @@ export const sendRewardTransaction = async ({
             transactions: [
                 {
                     to: walletAddress,
-                    value: 0, // amount in native token
+                    value: 0,
                 },
             ],
         });

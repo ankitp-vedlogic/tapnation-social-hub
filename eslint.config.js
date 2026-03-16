@@ -11,7 +11,9 @@ module.exports = [
       ".expo/",
       ".vscode/",
       "babel.config.js",
+      "metro.config.js",
       "jest.config.js",
+      "eslint.config.js",
       "__mocks__/",
       ".eslintrc.js",
     ],
@@ -22,7 +24,7 @@ module.exports = [
   ...tseslint.configs.recommendedTypeChecked,
 
   {
-    files: ["**/*.{js,jsx,ts,tsx}"],
+    files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parserOptions: {
         project: true,

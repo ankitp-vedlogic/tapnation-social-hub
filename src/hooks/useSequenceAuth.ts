@@ -2,13 +2,12 @@
  * useSequenceAuth.ts
  *
  * Custom hook that wraps Sequence WaaS authentication flows.
- * Handles Google, Apple, and Email login + logout.
- * Updates global authStore and balanceStore on success.
+ * Handles Google, Apple, Email OTP, and Guest login + logout.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
-import { AuthRequest, exchangeCodeAsync, AccessTokenRequestConfig } from "expo-auth-session";
+import { AuthRequest, exchangeCodeAsync, AccessTokenRequestConfig } from 'expo-auth-session';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useAuthStore } from '../stores/authStore';
 import { useBalanceStore } from '../stores/balanceStore';
@@ -17,27 +16,78 @@ import { GOOGLE_CONFIG } from '../config/constants';
 import { ethers } from 'ethers';
 import { randomName } from 'utils/string';
 
+type SequenceSignInResponse = {
+  wallet: string;
+  email?: string;
+};
+
+type GoogleUser = {
+  id: string;
+  name: string | null;
+  givenName: string | null;
+  familyName: string | null;
+  photo: string | null;
+  email: string | undefined;
+};
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+};
+
+const asSequenceSignInResponse = (value: unknown): SequenceSignInResponse => {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'wallet' in value &&
+    typeof (value as { wallet: unknown }).wallet === 'string'
+  ) {
+    const parsed = value as { wallet: string; email?: unknown };
+    return {
+      wallet: parsed.wallet,
+      email: typeof parsed.email === 'string' ? parsed.email : undefined,
+    };
+  }
+
+  throw new Error('Invalid sign-in response from Sequence');
+};
+
+const isRequestCanceled = (error: unknown): boolean => {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ERR_REQUEST_CANCELED'
+  );
+};
+
 export function useSequenceAuth() {
-  const { setUser,
+  const {
+    setUser,
     setLoading,
     setEmailLoading,
     setAppleLoading,
     setGoogleLoading,
     setGuestLoading,
-    setError, logout: storeLogout } = useAuthStore();
+    setError,
+    logout: storeLogout,
+  } = useAuthStore();
   const { setBalance, setLoadingBalance } = useBalanceStore();
-  const [respondWithCode, setRespondWithCode] = useState<
-    ((code: string) => Promise<void>) | null
-  >();
+
+  const [respondWithCode, setRespondWithCode] = useState<((code: string) => Promise<void>) | null>(null);
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [emailSignInPromise, setEmailSignInPromise] = useState<Promise<unknown> | null>(null);
 
   useEffect(() => {
-    return sequenceWaas.onEmailAuthCodeRequired(async (respondWithCode) => {
+    return sequenceWaas.onEmailAuthCodeRequired(async (nextRespondWithCode) => {
       setLoading(false);
-      setRespondWithCode(() => respondWithCode);
+      setEmailLoading(false);
+      setRespondWithCode(() => nextRespondWithCode);
     });
-  }, [sequenceWaas, setLoading, setRespondWithCode]);
+  }, [setLoading, setEmailLoading]);
 
-  // ─── Shared: Post-Login Balance Fetch ──────────────────────────
   const fetchAndSetBalance = useCallback(async (walletAddress: string) => {
     setLoadingBalance(true);
     try {
@@ -55,106 +105,98 @@ export function useSequenceAuth() {
     }
   }, [setBalance, setLoadingBalance]);
 
-  // ─── Google Login ───────────────────────────────────────────────
   const loginWithGoogle = useCallback(async () => {
     setGoogleLoading(true);
     setError(null);
+
     try {
       const timeout = (ms: number) =>
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Login timeout. Please try again.")), ms)
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Login timeout. Please try again.')), ms)
         );
 
-      const redirectUri = `${GOOGLE_CONFIG.iosClientId}:/oauthredirect`;
+      const isIOS = Platform.OS === 'ios';
+      const appClientId = isIOS ? GOOGLE_CONFIG.iosClientId : GOOGLE_CONFIG.androidClientId;
+      const redirectUri = `${appClientId}:/oauthredirect`;
 
-      const scopes = ["openid", "profile", "email"];
       const request = new AuthRequest({
-        clientId: GOOGLE_CONFIG.androidClientId,
-        scopes,
+        clientId: appClientId,
+        scopes: ['openid', 'profile', 'email'],
         redirectUri,
         usePKCE: true,
         extraParams: {
           audience: GOOGLE_CONFIG.webClientId,
-          include_granted_scopes: "true",
+          include_granted_scopes: 'true',
         },
       });
 
       const result = await request.promptAsync({
-        authorizationEndpoint: `https://accounts.google.com/o/oauth2/v2/auth`,
+        authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
       });
 
-      if (result.type === "cancel") {
-        return undefined;
+      if (result.type === 'cancel') {
+        return;
       }
 
-      if (result.type !== "success") {
-        throw new Error("Authentication failed");
+      if (result.type !== 'success') {
+        throw new Error('Authentication failed');
       }
 
       const serverAuthCode = result.params?.code;
+      if (!serverAuthCode) {
+        throw new Error('Google authorization code missing');
+      }
 
-      const configForTokenExchange: AccessTokenRequestConfig = {
+      const tokenConfig: AccessTokenRequestConfig = {
         code: serverAuthCode,
         redirectUri,
-        clientId: GOOGLE_CONFIG.androidClientId,
+        clientId: appClientId,
         extraParams: {
-          code_verifier: request?.codeVerifier || "",
+          code_verifier: request.codeVerifier || '',
           audience: GOOGLE_CONFIG.webClientId,
         },
       };
 
-      const tokenResponse = await exchangeCodeAsync(configForTokenExchange, {
-        tokenEndpoint: "https://oauth2.googleapis.com/token",
+      const tokenResponse = await exchangeCodeAsync(tokenConfig, {
+        tokenEndpoint: 'https://oauth2.googleapis.com/token',
       });
 
-      const userInfo = await fetchGoogleUserInfo(tokenResponse.accessToken);
-
-      const idToken = tokenResponse.idToken;
-
-      if (!idToken) {
-        throw new Error("No idToken");
+      if (!tokenResponse.idToken) {
+        throw new Error('No idToken from Google');
       }
 
-
-      // const signInResponse = await sequenceWaas.signIn(
-      //   { idToken },
-      //   'TapNation Social Hub'
-      // );
-
-      const signInResponse: any = await Promise.race([
-        sequenceWaas.signIn(
-          { idToken },
-          "TapNation Social Hub"
-        ),
-        timeout(10000)
+      const userInfo = await fetchGoogleUserInfo(tokenResponse.accessToken);
+      const signInRaw = await Promise.race([
+        sequenceWaas.signIn({ idToken: tokenResponse.idToken }, 'TapNation Social Hub'),
+        timeout(10000),
       ]);
 
-      const walletAddress = signInResponse.wallet;
+      const signInResponse = asSequenceSignInResponse(signInRaw);
 
       setUser({
-        walletAddress,
-        email: userInfo?.email,
+        walletAddress: signInResponse.wallet,
+        email: userInfo.email,
         provider: 'google',
       });
 
-      await fetchAndSetBalance(walletAddress);
-    } catch (error: any) {
+      await fetchAndSetBalance(signInResponse.wallet);
+    } catch (error) {
       console.log('[useSequenceAuth] Google login failed:', error);
-      setError(error?.message || 'Google login failed. Please try again.');
-      setGoogleLoading(false);
+      setError(getErrorMessage(error, 'Google login failed. Please try again.'));
     } finally {
       setGoogleLoading(false);
     }
   }, [setGoogleLoading, setError, setUser, fetchAndSetBalance]);
 
-  // ─── Apple Login ────────────────────────────────────────────────
   const loginWithApple = useCallback(async () => {
     if (Platform.OS !== 'ios') {
       setError('Apple Sign-In is only available on iOS.');
       return;
     }
+
     setAppleLoading(true);
     setError(null);
+
     try {
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
@@ -163,104 +205,112 @@ export function useSequenceAuth() {
         ],
       });
 
-      const { identityToken } = credential;
-      if (!identityToken) throw new Error('No identity token from Apple');
-      console.log("identityToken->", identityToken);
+      if (!credential.identityToken) {
+        throw new Error('No identity token from Apple');
+      }
 
-      const signInResponse = await sequenceWaas.signIn(
-        { idToken: identityToken },
+      const signInRaw = await sequenceWaas.signIn(
+        { idToken: credential.identityToken },
         'TapNation Social Hub'
       );
 
-      console.log("kem bhai");
-      console.log(signInResponse);
-
-      const walletAddress = signInResponse.wallet;
+      const signInResponse = asSequenceSignInResponse(signInRaw);
 
       setUser({
-        walletAddress,
-        email: signInResponse.email ?? undefined,
+        walletAddress: signInResponse.wallet,
+        email: signInResponse.email,
         provider: 'apple',
       });
 
-      await fetchAndSetBalance(walletAddress);
-    } catch (error: any) {
-      if (error?.code === 'ERR_REQUEST_CANCELED') {
-        setError(null); // User cancelled — not an error
-        setAppleLoading(false);
+      await fetchAndSetBalance(signInResponse.wallet);
+    } catch (error) {
+      if (isRequestCanceled(error)) {
+        setError(null);
         return;
       }
+
       console.log('[useSequenceAuth] Apple login failed:', error);
-      setError(error?.message || 'Apple login failed. Please try again.');
+      setError(getErrorMessage(error, 'Apple login failed. Please try again.'));
+    } finally {
       setAppleLoading(false);
     }
   }, [setAppleLoading, setError, setUser, fetchAndSetBalance]);
 
-  // ─── Email Login ────────────────────────────────────────────────
   const sendEmailOTP = useCallback(async (email: string) => {
+    setEmailLoading(true);
     setError(null);
-    try {
-      const signInResponse = await sequenceWaas.signIn({ email }, randomName());
-      const walletAddress = signInResponse.wallet;
-      setUser({
-        walletAddress,
-        email,
-        provider: 'email',
-      });
 
-      await fetchAndSetBalance(walletAddress);
-      setEmailLoading(false);
+    try {
+      const pendingPromise = sequenceWaas.signIn({ email }, randomName());
+      void pendingPromise.catch(() => undefined);
+      setPendingEmail(email);
+      setEmailSignInPromise(pendingPromise);
       return true;
-    } catch (error: any) {
+    } catch (error) {
       console.log('[useSequenceAuth] OTP send failed:', error);
-      setError(error?.message || 'Failed to send OTP. Check your email.');
+      setError(getErrorMessage(error, 'Failed to send OTP. Check your email.'));
+      setPendingEmail(null);
+      setEmailSignInPromise(null);
       setEmailLoading(false);
       return false;
     }
-  }, [setEmailLoading, setError, setUser, fetchAndSetBalance]);
+  }, [setEmailLoading, setError]);
 
-  const loginWithEmailOTP = useCallback(async (email: string, otp: string) => {
+  const loginWithEmailOTP = useCallback(async (_email: string, otp: string) => {
     setEmailLoading(true);
     setError(null);
+
     try {
-      if (!respondWithCode) return;
-      try {
-        await respondWithCode(otp);
-      } catch (err) {
-        setError('Invalid OTP, try again');
-        setEmailLoading(false);
+      if (!respondWithCode || !emailSignInPromise || !pendingEmail) {
+        setError('Please request OTP first.');
+        return;
       }
 
-    } catch (error: any) {
+      await respondWithCode(otp);
+      const signInRaw = await emailSignInPromise;
+      const signInResponse = asSequenceSignInResponse(signInRaw);
+
+      setUser({
+        walletAddress: signInResponse.wallet,
+        email: pendingEmail,
+        provider: 'email',
+      });
+
+      await fetchAndSetBalance(signInResponse.wallet);
+      setPendingEmail(null);
+      setEmailSignInPromise(null);
+    } catch (error) {
       console.log('[useSequenceAuth] Email OTP login failed:', error);
+      setError(getErrorMessage(error, 'Invalid OTP. Please try again.'));
+    } finally {
       setEmailLoading(false);
-      setError(error?.message || 'Invalid OTP. Please try again.');
     }
-  }, [setEmailLoading, setError, respondWithCode]);
+  }, [setEmailLoading, setError, respondWithCode, emailSignInPromise, pendingEmail, setUser, fetchAndSetBalance]);
 
   const loginAsGuest = useCallback(async () => {
     setGuestLoading(true);
     setError(null);
+
     try {
-      const signInResponse = await sequenceWaas.signIn({ guest: true }, randomName());
-      const walletAddress = signInResponse.wallet;
+      const signInRaw = await sequenceWaas.signIn({ guest: true }, randomName());
+      const signInResponse = asSequenceSignInResponse(signInRaw);
+
       setUser({
-        walletAddress,
+        walletAddress: signInResponse.wallet,
         provider: 'guest',
       });
 
-      await fetchAndSetBalance(walletAddress);
-      setGuestLoading(false);
+      await fetchAndSetBalance(signInResponse.wallet);
       return true;
-    } catch (error: any) {
-      console.log('[useSequenceAuth] OTP send failed:', error);
-      setError(error?.message || 'Failed to send OTP. Check your email.');
-      setGuestLoading(false);
+    } catch (error) {
+      console.log('[useSequenceAuth] Guest login failed:', error);
+      setError(getErrorMessage(error, 'Guest login failed. Please try again.'));
       return false;
+    } finally {
+      setGuestLoading(false);
     }
   }, [setGuestLoading, setError, setUser, fetchAndSetBalance]);
 
-  // ─── Logout ─────────────────────────────────────────────────────
   const logout = useCallback(async () => {
     try {
       await sequenceWaas.dropSession({ sessionId: await sequenceWaas.getSessionId() });
@@ -271,7 +321,6 @@ export function useSequenceAuth() {
     }
   }, [storeLogout]);
 
-  // ─── Check Existing Session ──────────────────────────────────────
   const checkSession = useCallback(async () => {
     try {
       const valid = await isSessionValid();
@@ -279,7 +328,7 @@ export function useSequenceAuth() {
         const walletAddress = await sequenceWaas.getAddress();
         setUser({
           walletAddress,
-          provider: 'email', // default, doesn't matter for existing sessions
+          provider: 'email',
         });
         await fetchAndSetBalance(walletAddress);
         return true;
@@ -287,48 +336,36 @@ export function useSequenceAuth() {
     } catch (error) {
       console.warn('[useSequenceAuth] Session check failed:', error);
     }
+
     return false;
   }, [setUser, fetchAndSetBalance]);
 
-  type GoogleUser = {
-    user: {
-      id: string;
-      name: string | null;
-      givenName: string | null;
-      familyName: string | null;
-      photo: string | null;
-      email: string | undefined;
-    };
-    idToken: string;
-  };
+  const fetchGoogleUserInfo = async (accessToken: string): Promise<GoogleUser> => {
+    const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
-  const fetchGoogleUserInfo = async (
-    accessToken: string
-  ): Promise<GoogleUser["user"]> => {
-    const response = await fetch(
-      "https://www.googleapis.com/oauth2/v3/userinfo",
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    const json: unknown = await response.json();
+    if (typeof json !== 'object' || json === null) {
+      throw new Error('Invalid Google profile response');
+    }
 
-    const json: any = await response.json();
+    const userInfo = json as Record<string, unknown>;
 
     return {
-      id: json.sub,
-      name: json.name,
-      givenName: json.given_name,
-      familyName: json.family_name,
-      photo: json.picture,
-      email: json.email
+      id: typeof userInfo.sub === 'string' ? userInfo.sub : '',
+      name: typeof userInfo.name === 'string' ? userInfo.name : null,
+      givenName: typeof userInfo.given_name === 'string' ? userInfo.given_name : null,
+      familyName: typeof userInfo.family_name === 'string' ? userInfo.family_name : null,
+      photo: typeof userInfo.picture === 'string' ? userInfo.picture : null,
+      email: typeof userInfo.email === 'string' ? userInfo.email : undefined,
     };
   };
-
 
   return {
     loginWithGoogle,

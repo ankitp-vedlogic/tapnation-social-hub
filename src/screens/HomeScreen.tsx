@@ -29,7 +29,7 @@ export default function HomeScreen() {
   useEffect(() => {
     setGenerating(true);
 
-    streamOffers(addOffer, resetOffer, setGenerating);
+    streamOffers({ addOffer, resetOffer, setGenerating });
   }, []);
 
   return (

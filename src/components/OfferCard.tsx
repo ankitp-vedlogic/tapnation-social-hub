@@ -72,7 +72,7 @@ export default function OfferCard({ offer }: Props) {
 
     const handleClaim = async () => {
 
-        if (claiming) return;
+        if (claiming || !user?.walletAddress) return;
 
         if (Platform.OS !== "ios") {
             Vibration.vibrate(100);
@@ -84,14 +84,18 @@ export default function OfferCard({ offer }: Props) {
 
         setClaiming(true);
 
-        await claimOfferReward({
-            walletAddress: user?.walletAddress,
-            reward: offer.reward,
-            offerId: offer.id,
-            incrementBalance,
-            removeOffer,
-            showReward
-        });
+        try {
+            await claimOfferReward({
+                walletAddress: user.walletAddress,
+                reward: offer.reward,
+                offerId: offer.id,
+                incrementBalance,
+                removeOffer,
+                showReward
+            });
+        } finally {
+            setClaiming(false);
+        }
     };
 
     return (

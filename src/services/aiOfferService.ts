@@ -7,6 +7,18 @@ export interface GameOffer {
     reward: number;
 }
 
+const isGameOfferArray = (value: unknown): value is GameOffer[] => {
+    if (!Array.isArray(value)) return false;
+    return value.every((item) => (
+        typeof item === "object" &&
+        item !== null &&
+        typeof (item as { title?: unknown }).title === "string" &&
+        typeof (item as { task?: unknown }).task === "string" &&
+        (typeof (item as { reward?: unknown }).reward === "number" ||
+            typeof (item as { reward?: unknown }).reward === "string")
+    ));
+};
+
 export const generateGameOffers = async (): Promise<GameOffer[]> => {
     try {
         const response = await fetch(AI_CONFIG.url, {
@@ -46,11 +58,31 @@ Note task hase max 3 words only
                 ],
             }),
         });
-        const data = await response.json();
+        const data: unknown = await response.json();
+        if (typeof data !== "object" || data === null) {
+            return [];
+        }
+        const record = data as Record<string, unknown>;
+        const choices = record.choices;
+        if (!Array.isArray(choices) || choices.length === 0) {
+            return [];
+        }
+        const firstChoice = choices[0] as { message?: { content?: unknown } };
+        const content = firstChoice?.message?.content;
+        if (typeof content !== "string") {
+            return [];
+        }
 
-        const content = data?.choices?.[0]?.message?.content;
+        const parsed: unknown = JSON.parse(content);
+        if (!isGameOfferArray(parsed)) {
+            return [];
+        }
 
-        const offers: GameOffer[] = JSON.parse(content);
+        const offers: GameOffer[] = parsed.map((offer) => ({
+            title: offer.title,
+            task: offer.task,
+            reward: typeof offer.reward === "string" ? Number(offer.reward) : offer.reward,
+        })).filter((offer) => Number.isFinite(offer.reward));
 
         return offers;
 

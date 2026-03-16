@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { BalanceState, WalletBalance, Transaction } from '../types';
+// import { ethers } from '../../cryptoSetup';
 import { ethers } from 'ethers';
 
 const DEFAULT_BALANCE: WalletBalance = {

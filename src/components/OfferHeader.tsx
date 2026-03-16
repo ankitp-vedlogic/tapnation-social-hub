@@ -12,7 +12,7 @@ export default function OfferHeader() {
     const loadMore = () => {
         if (generating) return;
         setGenerating(true);
-        streamOffers(addOffer, resetOffer, setGenerating);
+        streamOffers({ addOffer, resetOffer, setGenerating });
     };
 
     return (

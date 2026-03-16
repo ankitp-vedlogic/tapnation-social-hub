@@ -20,7 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSequenceAuth } from '../hooks/useSequenceAuth';
 import { RootStackParamList } from '../types';
-import { COLORS, SPACING } from '../config/constants';
+import { BORDER_RADIUS, COLORS, SPACING } from '../config/constants';
 
 const { width, height } = Dimensions.get('window');
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'Splash'>;
@@ -180,6 +180,3 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
-
-// Fix: import BORDER_RADIUS
-import { BORDER_RADIUS } from '../config/constants';

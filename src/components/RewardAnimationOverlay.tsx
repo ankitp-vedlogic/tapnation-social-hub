@@ -8,7 +8,12 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-export default function CoinRewardAnimation({ amount, onFinish }: any) {
+type RewardAnimationOverlayProps = {
+  amount: number;
+  onFinish: () => void;
+};
+
+export default function CoinRewardAnimation({ amount, onFinish }: RewardAnimationOverlayProps) {
 
   const translateY = useSharedValue(0);
   const opacity = useSharedValue(1);

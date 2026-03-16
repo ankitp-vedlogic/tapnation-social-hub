@@ -16,6 +16,6 @@ if (!globalThis.crypto.getRandomValues) {
 
 (global as any).getRandomValues = Crypto.getRandomValues;
 
-// @ts-ignore
+// @ts-expect-error This module re-exports shim types that do not ship full TS metadata in this environment.
 export * from "@ethersproject/shims";
 export * from "ethers";
